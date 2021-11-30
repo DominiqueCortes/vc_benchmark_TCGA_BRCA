@@ -1,0 +1,110 @@
+#Primero leí los archivos y cree un objeto para cada tabla
+mutect <- read.delim(file = "C:/Users/Dominique/Desktop/vc.tcga/mutect2_snv.tsv", stringsAsFactors = FALSE)
+varscan <- read.delim(file = "C:/Users/Dominique/Desktop/vc.tcga/varscan2_snv.tsv", stringsAsFactors = FALSE)
+muse <- read.delim(file = "C:/Users/Dominique/Desktop/vc.tcga/muse_snv.tsv", stringsAsFactors = FALSE)
+somatics <- read.delim(file = "C:/Users/Dominique/Desktop/vc.tcga/somaticsniper_snv.tsv", stringsAsFactors = FALSE)
+
+#Luego revisé las generalidades de cada dataframe creado
+
+glimpse(mutect)
+glimpse(varscan)
+glimpse(muse)
+glimpse(somatics)
+
+#Luego extraje eliminé los duplicados de las columnas "Sample_ID" que corresponde a los identificadores de cada muestrase ordenaron por orden alfabético y numérico y se creo un objeto por cada algoritmo
+
+mutect_samples <- mutect %>% distinct(Sample_ID, .keep_all = TRUE) %>% arrange(Sample_ID)
+glimpse(mutect_samples)
+varscan_samples <- varscan %>% distinct(Sample_ID, .keep_all = TRUE) %>% arrange(Sample_ID)
+muse_samples <- muse %>% distinct(Sample_ID, .keep_all = TRUE) %>% arrange(Sample_ID) 
+somatics_samples <- somatics %>% distinct(Sample_ID, .keep_all = TRUE) %>% arrange(Sample_ID)
+
+#Vi el resumen de los demás dataframes con glimpse para ver cuantas filas tenían y el output fue 986 para mutect, 986 para varscan, 983 para muse y 975 para somaticsniper. Posterior a ello uní los dataframes con respecto a las muestras comunes analizadas por cada algoritmo.
+
+mut_var <- inner_join(mutect_samples,varscan_samples,by = "Sample_ID")
+mut_var_muse <- inner_join(mut_var,muse_samples,by = "Sample_ID")
+mut_var_muse_som <- inner_join(mut_var_muse,somatics_samples,by = "Sample_ID")
+
+#Al observar con glimpse la unión de los dataframes podemos observar que tienen 975 muestras en común. Ahora vamos a filtrar. Después, retomando los dataframes originales sin quitar duplicados, ordenamos las muestras por orden alfabético, filtramos por "PASS" las muestras que pasaron los filtros de cada algoritmo y nos quedamos únicamente con las mutaciones "missense_variant".
+
+varscan_pass_miss <- varscan %>% arrange(Sample_ID) %>% filter(filter == "PASS", effect %in% c("missense_variant", "missense_variant;NMD_transcript_variant", "missense_variant;splice_region_variant", "missense_variant;splice_region_variant;NMD_transcript_variant"))
+muse_pass_miss <- muse %>% arrange(Sample_ID) %>% filter(filter == "PASS", effect %in% c("missense_variant", "missense_variant;NMD_transcript_variant", "missense_variant;splice_region_variant", "missense_variant;splice_region_variant;NMD_transcript_variant"))
+somatics_pass_miss <- somatics %>% arrange(Sample_ID) %>% filter(filter == "PASS", effect %in% c("missense_variant", "missense_variant;NMD_transcript_variant", "missense_variant;splice_region_variant", "missense_variant;splice_region_variant;NMD_transcript_variant"))
+glimpse(mutect_pass_miss)
+glimpse(varscan_pass)
+glimpse(muse_pass)
+
+# Luego comparé las mutaciones por una sola muestra, en este caso se utilizó la muestra TCGA-3C-AALI-01A y lo podemos observar en las tablas impresas
+
+
+mutbysample_mutect_pass_miss <- mutect_pass_miss %>% filter(Sample_ID == "TCGA-3C-AALI-01A")
+mutbysample_varscan_pass_miss <- varscan_pass_miss %>% filter(Sample_ID == "TCGA-3C-AALI-01A")
+mutbysample_muse_pass_miss <- muse_pass_miss %>% filter(Sample_ID == "TCGA-3C-AALI-01A")
+mutbysample_somatics_pass_miss <- somatics_pass_miss %>% filter(Sample_ID == "TCGA-3C-AALI-01A")
+
+#Ahora queremos ver ¿Cuántos mutaciones son llamadas por los cuatro algoritmos? Para esto primero hicimos una columna dummy asociando las muestras de los pacientes con cada mutación. Primero tenemos que activar la librería "tidyr"
+
+mutect_dummy <- unite(mutect_pass_miss,samplevariant, c(1,8),sep = ";", remove = FALSE)
+varscan_dummy <- unite(varscan_pass_miss,samplevariant, c(1,8),sep = ";", remove = FALSE)
+muse_dummy <- unite(muse_pass_miss,samplevariant, c(1,8),sep = ";", remove = FALSE)
+somatics_dummy <- unite(somatics_pass_miss,samplevariant, c(1,8),sep = ";", remove = FALSE)
+
+#Ahora unimos las tablas y únicamente se irán quedando aquellas que tengan las variantes comunes por cada algoritmo. Con la función "glimpse" podemos ver el output de la unión de las cuatro tablas.
+
+dummy_mut_var<- inner_join(mutect_dummy,varscan_dummy, by = "samplevariant")
+dummy_mut_var_muse <- inner_join(dummy_mut_var,muse_dummy, by = "samplevariant")
+dummy_mut_var_muse_som <- inner_join(dummy_mut_var_muse,somatics_dummy, by = "samplevariant")
+glimpse(dummy_mut_var_som)
+
+#Se descargaron los datos clínios con las sobrevidas de las muestras, se leyó la tabla y se creó un objeto
+
+survival <- read.delim(file="C:/Users/Dominique/Desktop/vc.tcga/TCGA-BRCA.survival.tsv", stringsAsFactors = FALSE)
+
+#Se cambió el nombre de la columna de los identificadores de las muestras para poder filtrar las muestras comunes entre los algoritmos y aquellos que tuvieran datos de sobrevida con la función inner_join()
+
+names(survival)[1] <- "Sample_ID"
+samples_survival <- inner_join(mut_var_muse_som,survival,by = "Sample_ID")
+
+#Luego separamos las muestras que tienen evento y aquellas que no tuvieron evento y las asignamos a un objeto cada una.
+
+samples_mut_event <- samples_survival %>% filter(OS == 1) %>% select(Sample_ID)
+samples_mut_no_event <- samples_survival %>% filter(OS == 0) %>% select(Sample_ID)
+
+#Ahora, por cada algoritmo podemos separar las muestras que tuvieron evento y aquellas que no tuvieron evento.
+mutect_presamples_event <- inner_join(mutect_os_pass_miss, samples_mut_event, by = "Sample_ID")
+varscan_presamples_event <- inner_join(varscan_os_pass_miss, samples_mut_event, by = "Sample_ID")
+muse_presamples_event <- inner_join(muse_os_pass_miss, samples_mut_event, by = "Sample_ID")
+somatics_presamples_event <- inner_join(somatics_os_pass_miss, samples_mut_event, by = "Sample_ID")
+mutect_presamples_no_event <- inner_join(mutect_os_pass_miss, samples_mut_no_event, by = "Sample_ID")
+varscan_presamples_no_event <- inner_join(varscan_os_pass_miss, samples_mut_no_event, by = "Sample_ID")
+muse_presamples_no_event <- inner_join(muse_os_pass_miss, samples_mut_no_event, by = "Sample_ID")
+somatics_presamples_no_event <- inner_join(somatics_os_pass_miss, samples_mut_no_event, by = "Sample_ID")
+
+#Después nos quedamos únicamente con las columnas originales del maf.
+
+mutect_events_TCGA_BRCA_hg38 <- mutect_presamples_event %>% select(Sample_ID,gene,chrom,start,end,ref,alt,Amino_Acid_Change,effect,filter,dna_vaf)
+varscan_events_TCGA_BRCA_hg38 <- varscan_presamples_event %>% select(Sample_ID,gene,chrom,start,end,ref,alt,Amino_Acid_Change,effect,filter,dna_vaf)
+muse_events_TCGA_BRCA_hg38 <- muse_presamples_event %>% select(Sample_ID,gene,chrom,start,end,ref,alt,Amino_Acid_Change,effect,filter,dna_vaf)
+somatics_events_TCGA_BRCA_hg38 <- somatics_presamples_event %>% select(Sample_ID,gene,chrom,start,end,ref,alt,Amino_Acid_Change,effect,filter,dna_vaf)
+mutect_no_events_TCGA_BRCA_hg38 <- mutect_presamples_no_event %>% select(Sample_ID,gene,chrom,start,end,ref,alt,Amino_Acid_Change,effect,filter,dna_vaf)
+varscan_no_events_TCGA_BRCA_hg38 <- varscan_presamples_no_event %>% select(Sample_ID,gene,chrom,start,end,ref,alt,Amino_Acid_Change,effect,filter,dna_vaf)
+muse_no_events_TCGA_BRCA_hg38 <- muse_presamples_no_event %>% select(Sample_ID,gene,chrom,start,end,ref,alt,Amino_Acid_Change,effect,filter,dna_vaf)
+somatics_no_events_TCGA_BRCA_hg38 <- somatics_presamples_no_event %>% select(Sample_ID,gene,chrom,start,end,ref,alt,Amino_Acid_Change,effect,filter,dna_vaf)
+
+#Ahora crearemos unos archivos correspondientes a cada dataframe
+
+write.table(mutect_events_TCGA_BRCA_hg38,file="C:/Users/Dominique/Desktop/vc.tcga/OS/mutect2_event_TCGA_BRCA_hg38", append = FALSE, quote = FALSE, sep = "\t", row.names = FALSE)
+write.table(varscan_events_TCGA_BRCA_hg38,file="C:/Users/Dominique/Desktop/vc.tcga/OS/varscan2_event_TCGA_BRCA_hg38", append = FALSE, quote = FALSE, sep = "\t", row.names = FALSE)
+write.table(muse_events_TCGA_BRCA_hg38,file="C:/Users/Dominique/Desktop/vc.tcga/OS/muse_event_TCGA_BRCA_hg38", append = FALSE, quote = FALSE, sep = "\t", row.names = FALSE)
+write.table(somatics_events_TCGA_BRCA_hg38,file="C:/Users/Dominique/Desktop/vc.tcga/OS/somatics_event_TCGA_BRCA_hg38", append = FALSE, quote = FALSE, sep = "\t", row.names = FALSE)
+write.table(mutect_no_events_TCGA_BRCA_hg38,file="C:/Users/Dominique/Desktop/vc.tcga/OS/mutect2_NO_event_TCGA_BRCA_hg38", append = FALSE, quote = FALSE, sep = "\t", row.names = FALSE)
+write.table(varscan_no_events_TCGA_BRCA_hg38,file="C:/Users/Dominique/Desktop/vc.tcga/OS/varscan2_NO_event_TCGA_BRCA_hg38", append = FALSE, quote = FALSE, sep = "\t", row.names = FALSE)
+write.table(muse_no_events_TCGA_BRCA_hg38,file="C:/Users/Dominique/Desktop/vc.tcga/OS/muse_NO_event_TCGA_BRCA_hg38", append = FALSE, quote = FALSE, sep = "\t", row.names = FALSE)
+write.table(somatics_no_events_TCGA_BRCA_hg38,file="C:/Users/Dominique/Desktop/vc.tcga/OS/somatics_NO_event_TCGA_BRCA_hg38", append = FALSE, quote = FALSE, sep = "\t", row.names = FALSE)
+
+#Ahora, con estos archivos podemos hacr un liftover para pasar las coordenadas de las variantes al genoma de referencia "Hg19" y posteriormente utilizarlo como input para detectar las mutaciones significativas en los grupos clínicos de interés.
+
+
+
+
+
